@@ -4,7 +4,7 @@ import logging
 
 def get_launcher_apps():
     logging.info("🔍 Fetching installed apps...")
-    output = subprocess.check_output("adb shell pm list packages -3", shell=True, text=True)
+    output = subprocess.check_output("adb shell pm list packages", shell=True, text=True)
     pkgs = [line.replace("package:", "").strip() for line in output.strip().splitlines()]
     
     label_map = {}
