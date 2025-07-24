@@ -1,0 +1,7 @@
+pure-python-adb
+opencv-python
+pillow
+numpy
+openai
+pytesseract
+matplotlib
