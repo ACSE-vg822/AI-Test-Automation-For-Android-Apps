@@ -5,3 +5,5 @@ numpy
 openai
 pytesseract
 matplotlib
+logging
+setuptools
