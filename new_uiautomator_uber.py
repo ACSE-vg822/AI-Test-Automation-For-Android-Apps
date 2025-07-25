@@ -138,18 +138,28 @@ def extract_label_from_request(user_request):
 # === Plan generation ===
 def generate_plan(user_request):
     print(f"🧠 Generating plan for: '{user_request}'")
-    system_prompt = """
-You are a mobile automation planner. Generate a step-by-step plan for automating the Uber app using uiautomator2.
+    # Read UI text from uber.txt if available
+    ui_text = ""
+    try:
+        with open("app_context/uber.txt", "r", encoding="utf-8") as f:
+            ui_text = f.read()
+    except Exception as e:
+        print(f"⚠️ Could not read uber.txt: {e}")
+    system_prompt = f"""
+You are a mobile automation planner. The following is the visible UI text on the screen:
+{ui_text}
+
+Generate a step-by-step plan for automating the Uber app using uiautomator2.
 
 Each step should be:
 - Directly mappable to uiautomator2 methods
 - Written in JSON format like:
 [
-  { "action": "click", "target": "text='Search'" },
-  { "action": "type", "value": "Wireless Headphones" },
-  { "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Wireless Headphones')]" },
-  { "action": "wait", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" },
-  { "action": "extract", "target": "xpath=(//android.widget.TextView[contains(@text, '$')])[1]" }
+  {{ "action": "click", "target": "text='Search'" }},
+  {{ "action": "type", "value": "Wireless Headphones" }},
+  {{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Wireless Headphones')]" }},
+  {{ "action": "wait", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }},
+  {{ "action": "extract", "target": "xpath=(//android.widget.TextView[contains(@text, '$')])[1]" }}
 ]
 Only output valid JSON array — no markdown or explanations.
 """
