@@ -84,60 +84,13 @@ def gpt_fallback(image_path, label=None):
         print(f"❌ GPT fallback failed: {e}")
         return None
 
-# === Smart fallback helper ===
-def smart_fallback(d, image_path, step, user_request):
-    ui_elements = []
-    for el in d.xpath("//*").all():
-        try:
-            info = el.info
-            if info.get("clickable") or info.get("enabled"):
-                ui_elements.append({
-                    "text": info.get("text", ""),
-                    "class": info.get("className", ""),
-                    "resource": info.get("resourceName", ""),
-                    "bounds": info.get("bounds", "")
-                })
-        except Exception:
-            pass
-
-    with open(image_path, "rb") as f:
-        b64_img = base64.b64encode(f.read()).decode("utf-8")
-
-    prompt = f"""
-You're automating an Android app using uiautomator2.
-
-User's request: "{user_request}"
-Step that failed: {json.dumps(step)}
-
-Here are all actionable UI elements:
-{json.dumps(ui_elements, indent=2)}
-
-Suggest a single Python command like:
-d(text="Auto").click()
-"""
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                { "role": "system", "content": "You are an Android UI automation assistant." },
-                { "role": "user", "content": [
-                    { "type": "text", "text": prompt },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64_img}",
-                            "detail": "high"
-                        }
-                    }
-                ]}
-            ],
-            max_tokens=100,
-            temperature=0.2
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"❌ smart_fallback GPT call failed: {e}")
-        return None
+def extract_label_from_request(user_request):
+    # Add more ride types as needed
+    ride_types = ["Uber Go", "Auto", "Request Any", "UberX", "Uber Pool"]
+    for ride in ride_types:
+        if ride.lower() in user_request.lower():
+            return ride
+    return None
 
 # === Plan generation ===
 def generate_plan(user_request):
@@ -182,6 +135,7 @@ Only output valid JSON array — no markdown or explanations.
 
 # === Main Executor ===
 def execute_plan(d, plan, user_request):
+    label_from_request = extract_label_from_request(user_request)
     for i, step in enumerate(plan):
         print(f"\n➡️ Step {i+1}: {step}")
         action = step.get("action")
@@ -229,7 +183,10 @@ def execute_plan(d, plan, user_request):
                     try:
                         txt = e.get_text()
                         print(f"[{i}] → {txt}")
-                        if "Auto" in txt or i == 1:
+                        if label_from_request and label_from_request in txt:
+                            print(f"✅ Extracted Value: {txt}")
+                            return txt
+                        if not label_from_request and ("Auto" in txt or i == 1):
                             print(f"✅ Extracted Value: {txt}")
                             return txt
                     except Exception as ex:
@@ -248,7 +205,10 @@ def execute_plan(d, plan, user_request):
                             try:
                                 txt = e.get_text()
                                 print(f"[{i}] → {txt}")
-                                if "Auto" in txt or i == 1:
+                                if label_from_request and label_from_request in txt:
+                                    print(f"✅ Extracted Value: {txt}")
+                                    return txt
+                                if not label_from_request and ("Auto" in txt or i == 1):
                                     print(f"✅ Extracted Value: {txt}")
                                     return txt
                             except Exception as ex:
@@ -258,27 +218,13 @@ def execute_plan(d, plan, user_request):
                 if not found:
                     print("⚠️ Step failed: No valid ₹ element matched after retries")
                     ss = take_screenshot(d, f"step_{i+1}_fallback")
-                    # Try extracting the label from the step or user_request for reusability
-                    label = None
-                    if "Auto" in json.dumps(step) or "Auto" in user_request:
-                        label = "Auto"
-                    elif "Uber Go" in json.dumps(step) or "Uber Go" in user_request:
-                        label = "Uber Go"
-                    suggestion = gpt_fallback(ss, label)
+                    # Use the explicit label from user request for fallback
+                    suggestion = gpt_fallback(ss, label_from_request)
                     print("🤖 GPT Extracted:", suggestion)
                     return suggestion
 
         else:
-            print("smart fallback wohooo")
-            suggestion = smart_fallback(d, ss, step, user_request)
-            print("🤖 GPT Smart Command:\n", suggestion)
-            if suggestion and suggestion.strip().startswith("d("):
-                try:
-                    exec(suggestion, {"d": d})
-                    continue
-                except Exception as ex:
-                    print(f"❌ Failed to run GPT suggestion: {ex}")
-                    break
+            print(f"⚠️ Step failed: Unknown action '{action}' in plan. Skipping.")
 
 # === Main ===
 def main():
