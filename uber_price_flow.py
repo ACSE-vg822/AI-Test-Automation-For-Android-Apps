@@ -6,8 +6,13 @@ import openai
 import re
 
 # === CONFIGURATION ===
-OPENAI_API_KEY = "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"
-openai.api_key = OPENAI_API_KEY
+from dotenv import load_dotenv
+import openai
+
+load_dotenv()  # Load from .env if exists
+
+# Use env variable
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
 UBER_PACKAGE = "com.ubercab"
