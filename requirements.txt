@@ -8,3 +8,4 @@ matplotlib
 logging
 setuptools
 requests
+uiautomator2
