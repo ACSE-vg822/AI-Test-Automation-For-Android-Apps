@@ -41,7 +41,8 @@ def extract_ui_elements(xml_path="view.xml", output_path="ui_elements.json"):
             "bounds": bounds,
             "center": center,
             "clickable": node.attrib.get("clickable", "false") == "true",
-            "focusable": node.attrib.get("focusable", "false") == "true"
+            "focusable": node.attrib.get("focusable", "false") == "true",
+            "focused": node.attrib.get("focused", "false") == "true"
         })
 
     with open(output_path, "w", encoding="utf-8") as f:

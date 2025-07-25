@@ -6,8 +6,9 @@ import openai
 import re
 
 # === CONFIGURATION ===
-OPENAI_API_KEY = "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"  # TODO: Replace with your OpenAI API key
+OPENAI_API_KEY = "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"
 openai.api_key = OPENAI_API_KEY
+
 
 UBER_PACKAGE = "com.ubercab"
 SCREENSHOT_DIR = "screenshots"
