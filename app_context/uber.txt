@@ -1,0 +1,19 @@
+Region: India
+
+Starting Screen: The app typically opens on the "Enter your destination" screen.
+
+Default Behavior:
+Users are prompted to tap the "Enter your destination" field to start the ride booking process.
+Current location is automatically detected using GPS and set as the pickup point.
+
+Flow Overview:
+
+Enter Destination: User taps the field "Enter your destination" and types a location.
+
+Suggested Locations: Autocomplete suggestions appear—user selects one, usually topmost one is the most relevant.
+
+Ride Categories Shown: After selecting a destination, available ride types (Auto, Uber Go, Go Sedan etc.) are listed.
+
+Pricing: Each ride option displays a price and estimated arrival time.
+
+Booking: User taps on a ride category to book.
