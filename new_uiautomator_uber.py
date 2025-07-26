@@ -14,8 +14,14 @@ from source.logger import setup_logger
 load_dotenv(override=True)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 UBER_PACKAGE = "com.ubercab"
-ZOMATO_PACKAGE = "com.zomato.app"
+ZOMATO_PACKAGE = "com.application.zomato"
 SCREENSHOT_DIR = "screenshots"
+
+# === App Selection ===
+APP_CONTEXT_FILES = {
+    "uber": (UBER_PACKAGE, "app_context/uber.txt"),
+    "zomato": (ZOMATO_PACKAGE, "app_context/zomato.txt")
+}
 
 # Setup logging
 logger = setup_logger()
@@ -25,9 +31,9 @@ def connect_to_device():
     logger.info("🔌 Connecting to device...")
     return u2.connect()
 
-def launch_app(d):
-    logger.info("🚀 Launching Uber...")
-    d.app_start(UBER_PACKAGE)
+def launch_app(d, package_name):
+    logger.info(f"🚀 Launching {package_name}...")
+    d.app_start(package_name)
     time.sleep(5)
 
 # === Screenshot + GPT fallback ===
@@ -40,28 +46,20 @@ def take_screenshot(d, label="fallback"):
     logger.info(f"🖼️ Screenshot size: {os.path.getsize(path) / 1024:.2f} KB")
     return path
 
-def gpt_fallback(image_path, user_request):
+def gpt_fallback(image_path, user_request, app_context_file):
     with open(image_path, "rb") as f:
         b64_img = base64.b64encode(f.read()).decode("utf-8")
 
     # Read app context for better understanding
     app_context = ""
     try:
-        with open("app_context/uber.txt", "r", encoding="utf-8") as f:
+        with open(app_context_file, "r", encoding="utf-8") as f:
             app_context = f.read()
     except Exception as e:
-        logger.warning(f"⚠️ Could not read uber.txt for fallback: {e}")
+        logger.warning(f"⚠️ Could not read {app_context_file} for fallback: {e}")
 
     # Use a more specific prompt with app context
-    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.
-
-App Context:
-{app_context}
-
-Extract the most relevant information from the screenshot to fulfill the user's request. 
-Look for prices, times, availability or any information that matches what the user is asking for.
-
-Only reply with the extracted value. And add concise explantion of your answer."""
+    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.\n\nApp Context:\n{app_context}\n\nExtract the most relevant information from the screenshot to fulfill the user's request. \nLook for prices, times, availability or any information that matches what the user is asking for.\n\nOnly reply with the extracted value. And add concise explantion of your answer."""
 
     try:
         response = openai.chat.completions.create(
@@ -96,48 +94,24 @@ Only reply with the extracted value. And add concise explantion of your answer."
         logger.error(f"❌ GPT fallback failed: {e}")
         return None
 
-def gpt_fallback_action(image_path, user_request, failed_step=None):
+def gpt_fallback_action(image_path, user_request, app_context_file, failed_step=None):
     with open(image_path, "rb") as f:
         b64_img = base64.b64encode(f.read()).decode("utf-8")
     
     # Read app context for better understanding
     app_context = ""
     try:
-        with open("app_context/uber.txt", "r", encoding="utf-8") as f:
+        with open(app_context_file, "r", encoding="utf-8") as f:
             app_context = f.read()
     except Exception as e:
-        logger.warning(f"⚠️ Could not read uber.txt for fallback: {e}")
+        logger.warning(f"⚠️ Could not read {app_context_file} for fallback: {e}")
     
     # Build context about the failure
     failure_context = ""
     if failed_step:
         failure_context = f"\nThe automation failed at step: {failed_step}"
     
-    prompt = f"""This is a screenshot of the mobile app. The automation failed to find or interact with the expected element.
-
-User Request: '{user_request}'
-{failure_context}
-
-App Context:
-{app_context}
-
-Based on the screenshot and app context, what is the next UI action needed to progress toward the user's goal?
-
-You must respond with a SINGLE JSON object in this exact format. Following is just an exmaple, your answer should be in accordance with the query and app context:
-{{ "action": "click", "target": "text='Button Text'" }}
-OR
-{{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Partial Text')]" }}
-OR
-{{ "action": "type", "value": "text to type" }}
-OR
-{{ "action": "extract", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }}
-
-Valid actions: "click", "type", "wait", "extract"
-Valid targets: "text='exact text'", "xpath=//path/to/element"
-For typing: use "value" field instead of "target"
-For extract: use "target" field with xpath to find elements to extract text from
-
-Only return the JSON object - no explanations or markdown formatting."""
+    prompt = f"""This is a screenshot of the mobile app. The automation failed to find or interact with the expected element.\n\nUser Request: '{user_request}'\n{failure_context}\n\nApp Context:\n{app_context}\n\nBased on the screenshot and app context, what is the next UI action needed to progress toward the user's goal?\n\nYou must respond with a SINGLE JSON object in this exact format. Following is just an exmaple, your answer should be in accordance with the query and app context:\n{{ "action": "click", "target": "text='Button Text'" }}\nOR\n{{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Partial Text')]" }}\nOR\n{{ "action": "type", "value": "text to type" }}\nOR\n{{ "action": "extract", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }}\n\nValid actions: "click", "type", "wait", "extract"\nValid targets: "text='exact text'", "xpath=//path/to/element"\nFor typing: use "value" field instead of "target"\nFor extract: use "target" field with xpath to find elements to extract text from\n\nOnly return the JSON object - no explanations or markdown formatting."""
     
     try:
         response = openai.chat.completions.create(
@@ -201,15 +175,15 @@ Only return the JSON object - no explanations or markdown formatting."""
         return None
 
 # === Plan generation ===
-def generate_plan(user_request):
+def generate_plan(user_request, app_context_file):
     logger.info(f"🧠 Generating plan for: '{user_request}'")
-    # Read UI text from uber.txt if available
+    # Read UI text from app context if available
     ui_text = ""
     try:
-        with open("app_context/uber.txt", "r", encoding="utf-8") as f:
+        with open(app_context_file, "r", encoding="utf-8") as f:
             ui_text = f.read()
     except Exception as e:
-        logger.warning(f"⚠️ Could not read uber.txt: {e}")
+        logger.warning(f"⚠️ Could not read {app_context_file}: {e}")
     system_prompt = f"""
 You are a mobile automation planner. The following is a basic flow overview of how major functions work in the app:
 {ui_text}
@@ -254,7 +228,7 @@ Only output valid JSON array — no markdown or explanations.
 
 
 # === Main Executor ===
-def execute_plan(d, plan, user_request):
+def execute_plan(d, plan, user_request, app_context_file):
     i = 0
     failed_nav_fallbacks = 0  # Track consecutive failed click/type fallbacks
     while i < len(plan):
@@ -289,7 +263,7 @@ def execute_plan(d, plan, user_request):
                 if failed_nav_fallbacks >= 2:
                     logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
                     ss = take_screenshot(d, f"step_{i+1}_extract_fallback")
-                    suggestion = gpt_fallback(ss, user_request)
+                    suggestion = gpt_fallback(ss, user_request, app_context_file)
                     logger.info(f"🤖 GPT Extracted: {suggestion}")
                     if suggestion:
                         logger.info(f"✅ Final Result: {suggestion}")
@@ -297,7 +271,7 @@ def execute_plan(d, plan, user_request):
                     # If extraction fails, continue as before
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_click_fallback")
-                    suggestion = gpt_fallback_action(ss, user_request, f"Step {i+1}: {step}")
+                    suggestion = gpt_fallback_action(ss, user_request, app_context_file, f"Step {i+1}: {step}")
                     logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
@@ -318,14 +292,14 @@ def execute_plan(d, plan, user_request):
                 if failed_nav_fallbacks >= 2:
                     logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
                     ss = take_screenshot(d, f"step_{i+1}_extract_fallback")
-                    suggestion = gpt_fallback(ss, user_request)
+                    suggestion = gpt_fallback(ss, user_request, app_context_file)
                     logger.info(f"🤖 GPT Extracted: {suggestion}")
                     if suggestion:
                         logger.info(f"✅ Final Result: {suggestion}")
                         return suggestion  # EARLY EXIT
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_type_fallback")
-                    suggestion = gpt_fallback_action(ss, user_request, f"Step {i+1}: {step}")
+                    suggestion = gpt_fallback_action(ss, user_request, app_context_file, f"Step {i+1}: {step}")
                     logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
@@ -381,7 +355,7 @@ def execute_plan(d, plan, user_request):
                     logger.warning(f"⚠️ Step failed: No valid value matched for: '{user_request}' after retries")
                     ss = take_screenshot(d, f"step_{i+1}_fallback")
                     # Use the explicit label from user request for fallback
-                    suggestion = gpt_fallback(ss, user_request)
+                    suggestion = gpt_fallback(ss, user_request, app_context_file)
                     logger.info(f"🤖 GPT Extracted: {suggestion}")
                     return suggestion  # EARLY EXIT
 
@@ -391,12 +365,18 @@ def execute_plan(d, plan, user_request):
 
 # === Main ===
 def main():
-    user_prompt = input("📝 What do you want to do?\n> ").strip()
+    app_choice = ""
+    while app_choice not in APP_CONTEXT_FILES:
+        app_choice = input("Which app do you want to automate? (uber/zomato): ").strip().lower()
+        if app_choice not in APP_CONTEXT_FILES:
+            print("Invalid choice. Please enter 'uber' or 'zomato'.")
+    package_name, app_context_file = APP_CONTEXT_FILES[app_choice]
+    user_prompt = input(f"📝 What do you want to do in {app_choice.title()}?\n> ").strip()
     d = connect_to_device()
-    launch_app(d)
-    plan = generate_plan(user_prompt)
+    launch_app(d, package_name)
+    plan = generate_plan(user_prompt, app_context_file)
     if plan:
-        result = execute_plan(d, plan, user_prompt)
+        result = execute_plan(d, plan, user_prompt, app_context_file)
         if result is not None:
             logger.info(f"✅ Final Result: {result}")
             return  # Stop further execution after extraction
