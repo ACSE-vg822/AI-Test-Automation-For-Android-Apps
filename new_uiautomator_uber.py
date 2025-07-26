@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from dotenv import load_dotenv
 import openai
+import logging
+from source.logger import setup_logger
 
 # === Setup ===
 load_dotenv(override=True)
@@ -14,13 +16,16 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 UBER_PACKAGE = "com.ubercab"
 SCREENSHOT_DIR = "screenshots"
 
+# Setup logging
+logger = setup_logger()
+
 # === Device Connection ===
 def connect_to_device():
-    print("🔌 Connecting to device...")
+    logger.info("🔌 Connecting to device...")
     return u2.connect()
 
 def launch_app(d):
-    print("🚀 Launching Uber...")
+    logger.info("🚀 Launching Uber...")
     d.app_start(UBER_PACKAGE)
     time.sleep(5)
 
@@ -30,8 +35,8 @@ def take_screenshot(d, label="fallback"):
     timestamp = datetime.now().strftime("%H%M%S")
     path = os.path.join(SCREENSHOT_DIR, f"{label}_{timestamp}.png")
     d.screenshot(path)
-    print(f"📸 Screenshot saved: {path}")
-    print(f"🖼️ Screenshot size: {os.path.getsize(path) / 1024:.2f} KB")
+    logger.info(f"📸 Screenshot saved: {path}")
+    logger.info(f"🖼️ Screenshot size: {os.path.getsize(path) / 1024:.2f} KB")
     return path
 
 def gpt_fallback(image_path, user_request):
@@ -44,7 +49,7 @@ def gpt_fallback(image_path, user_request):
         with open("app_context/uber.txt", "r", encoding="utf-8") as f:
             app_context = f.read()
     except Exception as e:
-        print(f"⚠️ Could not read uber.txt for fallback: {e}")
+        logger.warning(f"⚠️ Could not read uber.txt for fallback: {e}")
 
     # Use a more specific prompt with app context
     prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.
@@ -87,7 +92,7 @@ Only reply with the extracted value. Do not explain or add any formatting."""
             raw = re.sub(r"```[a-zA-Z]*", "", raw).strip("`").strip()
         return raw
     except Exception as e:
-        print(f"❌ GPT fallback failed: {e}")
+        logger.error(f"❌ GPT fallback failed: {e}")
         return None
 
 def gpt_fallback_action(image_path, user_request, failed_step=None):
@@ -100,7 +105,7 @@ def gpt_fallback_action(image_path, user_request, failed_step=None):
         with open("app_context/uber.txt", "r", encoding="utf-8") as f:
             app_context = f.read()
     except Exception as e:
-        print(f"⚠️ Could not read uber.txt for fallback: {e}")
+        logger.warning(f"⚠️ Could not read uber.txt for fallback: {e}")
     
     # Build context about the failure
     failure_context = ""
@@ -169,29 +174,29 @@ Only return the JSON object - no explanations or markdown formatting."""
         
         # Validate required fields
         if "action" not in result:
-            print("❌ GPT fallback action missing 'action' field")
+            logger.error("❌ GPT fallback action missing 'action' field")
             return None
         
         if result["action"] == "click" and "target" not in result:
-            print("❌ GPT fallback action missing 'target' field for click action")
+            logger.error("❌ GPT fallback action missing 'target' field for click action")
             return None
         
         if result["action"] == "type" and "value" not in result:
-            print("❌ GPT fallback action missing 'value' field for type action")
+            logger.error("❌ GPT fallback action missing 'value' field for type action")
             return None
         
         if result["action"] == "extract" and "target" not in result:
-            print("❌ GPT fallback action missing 'target' field for extract action")
+            logger.error("❌ GPT fallback action missing 'target' field for extract action")
             return None
         
         return result
         
     except json.JSONDecodeError as e:
-        print(f"❌ GPT fallback action JSON parsing failed: {e}")
-        print(f"Raw response: {raw}")
+        logger.error(f"❌ GPT fallback action JSON parsing failed: {e}")
+        logger.error(f"Raw response: {raw}")
         return None
     except Exception as e:
-        print(f"❌ GPT fallback action failed: {e}")
+        logger.error(f"❌ GPT fallback action failed: {e}")
         return None
 
 def extract_label_from_request(user_request):
@@ -204,14 +209,14 @@ def extract_label_from_request(user_request):
 
 # === Plan generation ===
 def generate_plan(user_request):
-    print(f"🧠 Generating plan for: '{user_request}'")
+    logger.info(f"🧠 Generating plan for: '{user_request}'")
     # Read UI text from uber.txt if available
     ui_text = ""
     try:
         with open("app_context/uber.txt", "r", encoding="utf-8") as f:
             ui_text = f.read()
     except Exception as e:
-        print(f"⚠️ Could not read uber.txt: {e}")
+        logger.warning(f"⚠️ Could not read uber.txt: {e}")
     system_prompt = f"""
 You are a mobile automation planner. The following is a basic flow overview of how major functions work in the app:
 {ui_text}
@@ -243,7 +248,7 @@ Only output valid JSON array — no markdown or explanations.
     )
 
     raw = response.choices[0].message.content.strip()
-    print("🪵 Raw LLM output:\n", raw)
+    logger.info("🪵 Raw LLM output:\n" + raw)
 
     try:
         # Auto-fix if wrapped in code block
@@ -251,7 +256,7 @@ Only output valid JSON array — no markdown or explanations.
             raw = re.sub(r"```(json)?", "", raw).strip("`")
         return json.loads(raw)
     except Exception as e:
-        print("❌ Plan parsing failed:", e)
+        logger.error(f"❌ Plan parsing failed: {e}")
         return []
 
 
@@ -262,7 +267,7 @@ def execute_plan(d, plan, user_request):
     failed_nav_fallbacks = 0  # Track consecutive failed click/type fallbacks
     while i < len(plan):
         step = plan[i]
-        print(f"\n➡️ Step {i+1}: {step}")
+        logger.info(f"\n➡️ Step {i+1}: {step}")
         action = step.get("action")
         target = step.get("target")
         value = step.get("value")
@@ -287,25 +292,25 @@ def execute_plan(d, plan, user_request):
                             d(text=fallback_text).click()
                             success = True
             if not success:
-                print("⚠️ Step failed: Click failed: Target not found")
+                logger.warning("⚠️ Step failed: Click failed: Target not found")
                 failed_nav_fallbacks += 1
                 if failed_nav_fallbacks >= 2:
-                    print("🔄 Too many navigation failures, switching to extraction fallback!")
+                    logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
                     ss = take_screenshot(d, f"step_{i+1}_extract_fallback")
                     suggestion = gpt_fallback(ss, user_request)
-                    print("🤖 GPT Extracted:", suggestion)
+                    logger.info(f"🤖 GPT Extracted: {suggestion}")
                     if suggestion:
-                        print(f"✅ Final Result: {suggestion}")
+                        logger.info(f"✅ Final Result: {suggestion}")
                         return suggestion  # EARLY EXIT
                     # If extraction fails, continue as before
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_click_fallback")
                     suggestion = gpt_fallback_action(ss, user_request, f"Step {i+1}: {step}")
-                    print("🤖 GPT Fallback Suggestion:", suggestion)
+                    logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
                     else:
-                        print("⚠️ No valid fallback action from GPT. Skipping.")
+                        logger.warning("⚠️ No valid fallback action from GPT. Skipping.")
                 i += 1
                 continue
             else:
@@ -316,84 +321,84 @@ def execute_plan(d, plan, user_request):
                 d.send_keys(value, clear=True)
                 failed_nav_fallbacks = 0  # Reset on success
             except Exception as e:
-                print(f"⚠️ Step failed: Type failed: {e}")
+                logger.warning(f"⚠️ Step failed: Type failed: {e}")
                 failed_nav_fallbacks += 1
                 if failed_nav_fallbacks >= 2:
-                    print("🔄 Too many navigation failures, switching to extraction fallback!")
+                    logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
                     ss = take_screenshot(d, f"step_{i+1}_extract_fallback")
                     suggestion = gpt_fallback(ss, user_request)
-                    print("🤖 GPT Extracted:", suggestion)
+                    logger.info(f"🤖 GPT Extracted: {suggestion}")
                     if suggestion:
-                        print(f"✅ Final Result: {suggestion}")
+                        logger.info(f"✅ Final Result: {suggestion}")
                         return suggestion  # EARLY EXIT
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_type_fallback")
                     suggestion = gpt_fallback_action(ss, user_request, f"Step {i+1}: {step}")
-                    print("🤖 GPT Fallback Suggestion:", suggestion)
+                    logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
                     else:
-                        print("⚠️ No valid fallback action from GPT. Skipping.")
+                        logger.warning("⚠️ No valid fallback action from GPT. Skipping.")
                 i += 1
                 continue
 
         elif action == "wait":
             xpath_val = target.replace("xpath=", "")
             if not d.xpath(xpath_val).wait(timeout=10):
-                print("⚠️ Step failed: Wait failed: XPath not visible")
+                logger.warning("⚠️ Step failed: Wait failed: XPath not visible")
                 # Optionally add fallback here
 
         elif action == "extract":
             xpath_val = target.replace("xpath=", "")
             try:
                 elems = d.xpath(xpath_val).all()
-                print(f"�� Found {len(elems)} matching elements while searching for: '{user_request}'")
+                logger.info(f" Found {len(elems)} matching elements while searching for: '{user_request}'")
                 for i_elem, e in enumerate(elems):
                     try:
                         txt = e.get_text()
-                        print(f"[{i_elem}] → {txt}")
+                        logger.info(f"[{i_elem}] → {txt}")
                         if label_from_request and label_from_request in txt:
-                            print(f"✅ Extracted Value: {txt}")
+                            logger.info(f"✅ Extracted Value: {txt}")
                             return txt  # EARLY EXIT
                         if not label_from_request and ("Auto" in txt or i_elem == 1):
-                            print(f"✅ Extracted Value: {txt}")
+                            logger.info(f"✅ Extracted Value: {txt}")
                             return txt  # EARLY EXIT
                     except Exception as ex:
-                        print(f"❌ Couldn’t extract from {i_elem}: {ex}")
+                        logger.error(f"❌ Couldn't extract from {i_elem}: {ex}")
                 raise Exception("No valid value matched")
             except Exception as e:
                 # Retry logic: wait up to 15s for any value to appear
-                print(f"⏳ Waiting for the relevant value for: '{user_request}' to appear...")
+                logger.info(f"⏳ Waiting for the relevant value for: '{user_request}' to appear...")
                 found = False
                 for retry in range(7):  # 7*2s = 14s
                     time.sleep(2)
                     elems = d.xpath(xpath_val).all()
                     if elems:
-                        print(f"🔍 Retry {retry+1}: Found {len(elems)} matching elements while searching for: '{user_request}'")
+                        logger.info(f"🔍 Retry {retry+1}: Found {len(elems)} matching elements while searching for: '{user_request}'")
                         for i_elem, e in enumerate(elems):
                             try:
                                 txt = e.get_text()
-                                print(f"[{i_elem}] → {txt}")
+                                logger.info(f"[{i_elem}] → {txt}")
                                 if label_from_request and label_from_request in txt:
-                                    print(f"✅ Extracted Value: {txt}")
+                                    logger.info(f"✅ Extracted Value: {txt}")
                                     return txt  # EARLY EXIT
                                 if not label_from_request and ("Auto" in txt or i_elem == 1):
-                                    print(f"✅ Extracted Value: {txt}")
+                                    logger.info(f"✅ Extracted Value: {txt}")
                                     return txt  # EARLY EXIT
                             except Exception as ex:
-                                print(f"❌ Couldn’t extract from {i_elem}: {ex}")
+                                logger.error(f"❌ Couldn't extract from {i_elem}: {ex}")
                         found = True
                         break
                 if not found:
-                    print(f"⚠️ Step failed: No valid value matched for: '{user_request}' after retries")
+                    logger.warning(f"⚠️ Step failed: No valid value matched for: '{user_request}' after retries")
                     ss = take_screenshot(d, f"step_{i+1}_fallback")
                     # Use the explicit label from user request for fallback
                     suggestion = gpt_fallback(ss, user_request)
-                    print("🤖 GPT Extracted:", suggestion)
+                    logger.info(f"🤖 GPT Extracted: {suggestion}")
                     return suggestion  # EARLY EXIT
 
         else:
-            print(f"⚠️ Step failed: Unknown action '{action}' in plan. Skipping.")
+            logger.warning(f"⚠️ Step failed: Unknown action '{action}' in plan. Skipping.")
         i += 1
 
 # === Main ===
@@ -405,7 +410,7 @@ def main():
     if plan:
         result = execute_plan(d, plan, user_prompt)
         if result is not None:
-            print(f"✅ Final Result: {result}")
+            logger.info(f"✅ Final Result: {result}")
             return  # Stop further execution after extraction
 
 if __name__ == "__main__":

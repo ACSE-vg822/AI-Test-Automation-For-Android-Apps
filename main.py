@@ -1,8 +1,8 @@
-from src.logger import setup_logger
-from src.adb_client import connect_adb
-from src.app_discovery import get_launcher_apps, fuzzy_match
-from src.screenshot import save_screenshot
-from src.actions import launch_app  # You can import more when needed
+from src_deprecated.logger import setup_logger
+from src_deprecated.adb_client import connect_adb
+from src_deprecated.app_discovery import get_launcher_apps, fuzzy_match
+from src_deprecated.screenshot import save_screenshot
+from src_deprecated.actions import launch_app  # You can import more when needed
 
 import time
 
