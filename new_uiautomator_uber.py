@@ -34,22 +34,16 @@ def take_screenshot(d, label="fallback"):
     print(f"🖼️ Screenshot size: {os.path.getsize(path) / 1024:.2f} KB")
     return path
 
-def gpt_fallback(image_path, label=None):
+def gpt_fallback(image_path, user_request):
     with open(image_path, "rb") as f:
         b64_img = base64.b64encode(f.read()).decode("utf-8")
 
-    # Use a concise, reusable prompt
-    if label:
-        prompt = (
-            f"This is a screenshot of a mobile app. "
-            f"Extract the price (₹, $, etc.) shown next to '{label}'. "
-            f"Only reply with the price, like ₹249.94 or $12.99. Do not explain."
-        )
-    else:
-        prompt = (
-            "This is a screenshot of a mobile app. "
-            "Extract the main price (₹, $, etc.) visible. Only reply with the price. Do not explain."
-        )
+    # Use a generic, reusable prompt based on the user request
+    prompt = (
+        f"This is a screenshot of a mobile app. The user request is: '{user_request}'. "
+        "Extract the most relevant information from the screenshot to fulfill the request. "
+        "Only reply with the extracted value. Do not explain."
+    )
 
     try:
         response = openai.chat.completions.create(
@@ -146,10 +140,12 @@ def generate_plan(user_request):
     except Exception as e:
         print(f"⚠️ Could not read uber.txt: {e}")
     system_prompt = f"""
-You are a mobile automation planner. The following is the visible UI text on the screen:
+You are a mobile automation planner. The following is a basic flow overview of how major functions work in the app:
 {ui_text}
 
-Generate a step-by-step plan for automating the Uber app using uiautomator2.
+ALWAYS generate a step-by-step plan for navigating the app using uiautomator2 to achieve what the user is asking for.
+If you can't complete the plan, generate a fallback plan that will help the user to complete the task or give them information closest to what they are asking for.
+BUT **ALWAYS** GENERATE A PLAN.
 
 Each step should be:
 - Directly mappable to uiautomator2 methods
@@ -223,7 +219,7 @@ def execute_plan(d, plan, user_request):
                 if failed_nav_fallbacks >= 2:
                     print("🔄 Too many navigation failures, switching to extraction fallback!")
                     ss = take_screenshot(d, f"step_{i+1}_extract_fallback")
-                    suggestion = gpt_fallback(ss, label_from_request)
+                    suggestion = gpt_fallback(ss, user_request)
                     print("🤖 GPT Extracted:", suggestion)
                     if suggestion:
                         print(f"✅ Final Result: {suggestion}")
@@ -252,7 +248,7 @@ def execute_plan(d, plan, user_request):
                 if failed_nav_fallbacks >= 2:
                     print("🔄 Too many navigation failures, switching to extraction fallback!")
                     ss = take_screenshot(d, f"step_{i+1}_extract_fallback")
-                    suggestion = gpt_fallback(ss, label_from_request)
+                    suggestion = gpt_fallback(ss, user_request)
                     print("🤖 GPT Extracted:", suggestion)
                     if suggestion:
                         print(f"✅ Final Result: {suggestion}")
@@ -278,7 +274,7 @@ def execute_plan(d, plan, user_request):
             xpath_val = target.replace("xpath=", "")
             try:
                 elems = d.xpath(xpath_val).all()
-                print(f"🔍 Found {len(elems)} ₹ elements")
+                print(f"�� Found {len(elems)} matching elements while searching for: '{user_request}'")
                 for i_elem, e in enumerate(elems):
                     try:
                         txt = e.get_text()
@@ -291,16 +287,16 @@ def execute_plan(d, plan, user_request):
                             return txt  # EARLY EXIT
                     except Exception as ex:
                         print(f"❌ Couldn’t extract from {i_elem}: {ex}")
-                raise Exception("No valid ₹ element matched")
+                raise Exception("No valid value matched")
             except Exception as e:
-                # Retry logic: wait up to 15s for any price to appear
-                print("⏳ Waiting for price to load...")
+                # Retry logic: wait up to 15s for any value to appear
+                print(f"⏳ Waiting for the relevant value for: '{user_request}' to appear...")
                 found = False
                 for retry in range(7):  # 7*2s = 14s
                     time.sleep(2)
                     elems = d.xpath(xpath_val).all()
                     if elems:
-                        print(f"🔍 Retry {retry+1}: Found {len(elems)} ₹ elements")
+                        print(f"🔍 Retry {retry+1}: Found {len(elems)} matching elements while searching for: '{user_request}'")
                         for i_elem, e in enumerate(elems):
                             try:
                                 txt = e.get_text()
@@ -316,10 +312,10 @@ def execute_plan(d, plan, user_request):
                         found = True
                         break
                 if not found:
-                    print("⚠️ Step failed: No valid ₹ element matched after retries")
+                    print(f"⚠️ Step failed: No valid value matched for: '{user_request}' after retries")
                     ss = take_screenshot(d, f"step_{i+1}_fallback")
                     # Use the explicit label from user request for fallback
-                    suggestion = gpt_fallback(ss, label_from_request)
+                    suggestion = gpt_fallback(ss, user_request)
                     print("🤖 GPT Extracted:", suggestion)
                     return suggestion  # EARLY EXIT
 

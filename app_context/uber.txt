@@ -1,19 +1,30 @@
 Region: India
 
-Starting Screen: The app typically opens on the "Enter your destination" screen.
+Starting Screen:
+- The app typically opens on the "Enter your destination" screen.
 
 Default Behavior:
-Users are prompted to tap the "Enter your destination" field to start the ride booking process.
-Current location is automatically detected using GPS and set as the pickup point.
+- Current location is automatically detected using GPS and set as the pickup point.
 
 Flow Overview:
 
-Enter Destination: User taps the field "Enter your destination" and types a location.
+1. Enter Destination:
+   - User taps the "Enter your destination" field and types the drop location.
 
-Suggested Locations: Autocomplete suggestions appear—user selects one, usually topmost one is the most relevant.
+2. Autocomplete Suggestions:
+   - Autocomplete suggestions appear.
+   - User selects one (usually the top suggestion).
 
-Ride Categories Shown: After selecting a destination, available ride types (Auto, Uber Go, Go Sedan etc.) are listed.
+3. Ride Selection:
+   - After destination is selected, available ride options (e.g., Auto, Uber Go, Go Sedan) are displayed.
+   - Each option shows **estimated fare, drop time and minutes until the ride can pick you up**.
+   - User taps their preferred ride option.
+   - Then, user must tap the button at the bottom that says "Choose <Ride Type>" (e.g., "Choose Premier").
 
-Pricing: Each ride option displays a price and estimated arrival time.
+4. Pickup Confirmation:
+   - A map screen appears showing the pickup location.
+   - User must tap the "Confirm Pickup" button to proceed.
 
-Booking: User taps on a ride category to book.
+5. Fare Confirmation (if applicable):
+   - Sometimes the fare changes during booking.
+   - User must tap "Confirm fare" or "Confirm new fare" to continue with the ride.
