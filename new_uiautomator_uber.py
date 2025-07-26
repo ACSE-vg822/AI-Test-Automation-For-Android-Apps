@@ -196,12 +196,13 @@ Each step should be:
 - Directly mappable to uiautomator2 methods
 - Written in JSON format like:
 [
-  {{ "action": "click", "target": "text='Search'" }},
+  {{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Search')]" }},
   {{ "action": "type", "value": "Wireless Headphones" }},
   {{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Wireless Headphones')]" }},
   {{ "action": "wait", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }},
   {{ "action": "extract", "target": "xpath=(//android.widget.TextView[contains(@text, '$')])[1]" }}
 ]
+
 Only output valid JSON array — no markdown or explanations.
 """
     response = openai.chat.completions.create(
@@ -365,6 +366,7 @@ def execute_plan(d, plan, user_request, app_context_file):
 
 # === Main ===
 def main():
+    from source.filter_ui_elements import extract_ui_elements
     app_choice = ""
     while app_choice not in APP_CONTEXT_FILES:
         app_choice = input("Which app do you want to automate? (uber/zomato): ").strip().lower()
@@ -374,6 +376,11 @@ def main():
     user_prompt = input(f"📝 What do you want to do in {app_choice.title()}?\n> ").strip()
     d = connect_to_device()
     launch_app(d, package_name)
+
+    time.sleep(3)
+    xml_str = d.dump_hierarchy(compressed=True)
+    print(extract_ui_elements(xml_str))
+
     plan = generate_plan(user_prompt, app_context_file)
     if plan:
         result = execute_plan(d, plan, user_prompt, app_context_file)

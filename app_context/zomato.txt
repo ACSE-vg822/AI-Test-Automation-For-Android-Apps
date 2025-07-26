@@ -1,0 +1,31 @@
+Region: India
+
+Starting Screen:
+- The app typically opens on the Home tab with a search bar at the top that has this text "Restaurant name or a dish..."
+
+Default Behavior:
+- Location is automatically detected using GPS and used to show nearby restaurants and dishes.
+
+Flow Overview:
+
+1. Search for Item:
+   - User taps the search bar at the top.
+   - User types a dish or food item name (e.g., "biryani").
+
+2. Autocomplete Suggestions:
+   - Suggestions appear while typing (names of most relevant dishes).
+   - User selects the top suggestion.
+
+3. List of restaurants
+   - After step 2. is complete, a page with list of restaurants opens up. 
+   - User most likely taps on the one with highest ratings
+
+4. Select Restaurant:
+   - The restaurant page opens, showing menu items categorized (e.g., Recommended, Biryani, Starters).
+   - The topmost item is usually highlighted as popular or recommended.
+
+5. Add to Cart:
+   - User taps the "ADD" or "+" button next to the topmost item.
+   - If a customization popup appears (e.g., spice level, addons):
+     - User selects default options or skips optional add-ons.
+     - User taps "Add Item" or "Continue" to confirm.
