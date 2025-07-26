@@ -38,63 +38,32 @@ def gpt_fallback(image_path, user_request):
     with open(image_path, "rb") as f:
         b64_img = base64.b64encode(f.read()).decode("utf-8")
 
-    # Use a generic, reusable prompt based on the user request
-    prompt = (
-        f"This is a screenshot of a mobile app. The user request is: '{user_request}'. "
-        "Extract the most relevant information from the screenshot to fulfill the request. "
-        "Only reply with the extracted value. Do not explain."
-    )
-
+    # Read app context for better understanding
+    app_context = ""
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful UI automation assistant. Only return the exact result asked."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        { "type": "text", "text": prompt },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{b64_img}",
-                                "detail": "high"
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=100,
-            temperature=0.1
-        )
-        raw = response.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"```[a-zA-Z]*", "", raw).strip("`").strip()
-        return raw
+        with open("app_context/uber.txt", "r", encoding="utf-8") as f:
+            app_context = f.read()
     except Exception as e:
-        print(f"❌ GPT fallback failed: {e}")
-        return None
+        print(f"⚠️ Could not read uber.txt for fallback: {e}")
 
-def gpt_fallback_action(image_path, user_request):
-    with open(image_path, "rb") as f:
-        b64_img = base64.b64encode(f.read()).decode("utf-8")
-    prompt = (
-        "This is a screenshot of a mobile app. The automation failed to find or interact with the expected element. "
-        f"The user request is: '{user_request}'. "
-        "What is the next UI action (click/type) to progress toward this goal? "
-        "Reply with a single JSON object, e.g., { \"action\": \"click\", \"target\": \"text='...'\" }. "
-        "Do not explain."
-    )
+    # Use a more specific prompt with app context
+    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.
+
+App Context:
+{app_context}
+
+Extract the most relevant information from the screenshot to fulfill the user's request. 
+Look for prices, times, availability or any information that matches what the user is asking for.
+
+Only reply with the extracted value. Do not explain or add any formatting."""
+
     try:
         response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful UI automation assistant. Only return the exact result asked."
+                    "content": "You are a mobile automation assistant. Extract only the requested information from the screenshot. Return only the value, no explanations."
                 },
                 {
                     "role": "user",
@@ -116,7 +85,111 @@ def gpt_fallback_action(image_path, user_request):
         raw = response.choices[0].message.content.strip()
         if raw.startswith("```"):
             raw = re.sub(r"```[a-zA-Z]*", "", raw).strip("`").strip()
-        return json.loads(raw)
+        return raw
+    except Exception as e:
+        print(f"❌ GPT fallback failed: {e}")
+        return None
+
+def gpt_fallback_action(image_path, user_request, failed_step=None):
+    with open(image_path, "rb") as f:
+        b64_img = base64.b64encode(f.read()).decode("utf-8")
+    
+    # Read app context for better understanding
+    app_context = ""
+    try:
+        with open("app_context/uber.txt", "r", encoding="utf-8") as f:
+            app_context = f.read()
+    except Exception as e:
+        print(f"⚠️ Could not read uber.txt for fallback: {e}")
+    
+    # Build context about the failure
+    failure_context = ""
+    if failed_step:
+        failure_context = f"\nThe automation failed at step: {failed_step}"
+    
+    prompt = f"""This is a screenshot of the mobile app. The automation failed to find or interact with the expected element.
+
+User Request: '{user_request}'
+{failure_context}
+
+App Context:
+{app_context}
+
+Based on the screenshot and app context, what is the next UI action needed to progress toward the user's goal?
+
+You must respond with a SINGLE JSON object in this exact format. Following is just an exmaple, your answer should be in accordance with the query and app context:
+{{ "action": "click", "target": "text='Button Text'" }}
+OR
+{{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Partial Text')]" }}
+OR
+{{ "action": "type", "value": "text to type" }}
+OR
+{{ "action": "extract", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }}
+
+Valid actions: "click", "type", "wait", "extract"
+Valid targets: "text='exact text'", "xpath=//path/to/element"
+For typing: use "value" field instead of "target"
+For extract: use "target" field with xpath to find elements to extract text from
+
+Only return the JSON object - no explanations or markdown formatting."""
+    
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a mobile automation assistant. You must return ONLY a valid JSON object with action and target/value fields. No explanations."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "text", "text": prompt },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{b64_img}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=200,
+            temperature=0.1
+        )
+        raw = response.choices[0].message.content.strip()
+        
+        # Clean up response
+        if raw.startswith("```"):
+            raw = re.sub(r"```(json)?", "", raw).strip("`").strip()
+        
+        # Parse and validate JSON
+        result = json.loads(raw)
+        
+        # Validate required fields
+        if "action" not in result:
+            print("❌ GPT fallback action missing 'action' field")
+            return None
+        
+        if result["action"] == "click" and "target" not in result:
+            print("❌ GPT fallback action missing 'target' field for click action")
+            return None
+        
+        if result["action"] == "type" and "value" not in result:
+            print("❌ GPT fallback action missing 'value' field for type action")
+            return None
+        
+        if result["action"] == "extract" and "target" not in result:
+            print("❌ GPT fallback action missing 'target' field for extract action")
+            return None
+        
+        return result
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ GPT fallback action JSON parsing failed: {e}")
+        print(f"Raw response: {raw}")
+        return None
     except Exception as e:
         print(f"❌ GPT fallback action failed: {e}")
         return None
@@ -227,7 +300,7 @@ def execute_plan(d, plan, user_request):
                     # If extraction fails, continue as before
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_click_fallback")
-                    suggestion = gpt_fallback_action(ss, user_request)
+                    suggestion = gpt_fallback_action(ss, user_request, f"Step {i+1}: {step}")
                     print("🤖 GPT Fallback Suggestion:", suggestion)
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
@@ -255,7 +328,7 @@ def execute_plan(d, plan, user_request):
                         return suggestion  # EARLY EXIT
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_type_fallback")
-                    suggestion = gpt_fallback_action(ss, user_request)
+                    suggestion = gpt_fallback_action(ss, user_request, f"Step {i+1}: {step}")
                     print("🤖 GPT Fallback Suggestion:", suggestion)
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
