@@ -14,6 +14,7 @@ from source.logger import setup_logger
 load_dotenv(override=True)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 UBER_PACKAGE = "com.ubercab"
+ZOMATO_PACKAGE = "com.zomato.app"
 SCREENSHOT_DIR = "screenshots"
 
 # Setup logging
@@ -199,14 +200,6 @@ Only return the JSON object - no explanations or markdown formatting."""
         logger.error(f"❌ GPT fallback action failed: {e}")
         return None
 
-def extract_label_from_request(user_request):
-    # Add more ride types as needed
-    ride_types = ["Uber Go", "Auto", "Request Any", "UberX", "Uber Pool"]
-    for ride in ride_types:
-        if ride.lower() in user_request.lower():
-            return ride
-    return None
-
 # === Plan generation ===
 def generate_plan(user_request):
     logger.info(f"🧠 Generating plan for: '{user_request}'")
@@ -262,7 +255,6 @@ Only output valid JSON array — no markdown or explanations.
 
 # === Main Executor ===
 def execute_plan(d, plan, user_request):
-    label_from_request = extract_label_from_request(user_request)
     i = 0
     failed_nav_fallbacks = 0  # Track consecutive failed click/type fallbacks
     while i < len(plan):
@@ -357,10 +349,8 @@ def execute_plan(d, plan, user_request):
                     try:
                         txt = e.get_text()
                         logger.info(f"[{i_elem}] → {txt}")
-                        if label_from_request and label_from_request in txt:
-                            logger.info(f"✅ Extracted Value: {txt}")
-                            return txt  # EARLY EXIT
-                        if not label_from_request and ("Auto" in txt or i_elem == 1):
+                        # Return the first element found (simplified logic)
+                        if i_elem == 0:
                             logger.info(f"✅ Extracted Value: {txt}")
                             return txt  # EARLY EXIT
                     except Exception as ex:
@@ -379,10 +369,8 @@ def execute_plan(d, plan, user_request):
                             try:
                                 txt = e.get_text()
                                 logger.info(f"[{i_elem}] → {txt}")
-                                if label_from_request and label_from_request in txt:
-                                    logger.info(f"✅ Extracted Value: {txt}")
-                                    return txt  # EARLY EXIT
-                                if not label_from_request and ("Auto" in txt or i_elem == 1):
+                                # Return the first element found (simplified logic)
+                                if i_elem == 0:
                                     logger.info(f"✅ Extracted Value: {txt}")
                                     return txt  # EARLY EXIT
                             except Exception as ex:
