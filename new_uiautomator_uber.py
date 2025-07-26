@@ -60,7 +60,7 @@ App Context:
 Extract the most relevant information from the screenshot to fulfill the user's request. 
 Look for prices, times, availability or any information that matches what the user is asking for.
 
-Only reply with the extracted value. Do not explain or add any formatting."""
+Only reply with the extracted value. And add concise explantion of your answer."""
 
     try:
         response = openai.chat.completions.create(
