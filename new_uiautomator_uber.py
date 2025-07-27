@@ -17,6 +17,9 @@ UBER_PACKAGE = "com.ubercab"
 ZOMATO_PACKAGE = "com.application.zomato"
 SCREENSHOT_DIR = "screenshots"
 
+# === Configuration ===
+# USE_UI_ELEMENTS = True  # Flag to control UI elements extraction and usage
+
 # === App Selection ===
 APP_CONTEXT_FILES = {
     "uber": (UBER_PACKAGE, "app_context/uber.txt"),
@@ -94,7 +97,7 @@ def gpt_fallback(image_path, user_request, app_context_file):
         logger.error(f"❌ GPT fallback failed: {e}")
         return None
 
-def gpt_fallback_action(image_path, user_request, app_context_file, failed_step=None):
+def gpt_fallback_action(image_path, user_request, app_context_file, failed_step=None, ui_elements=None, use_ui_elements=True):
     with open(image_path, "rb") as f:
         b64_img = base64.b64encode(f.read()).decode("utf-8")
     
@@ -106,12 +109,42 @@ def gpt_fallback_action(image_path, user_request, app_context_file, failed_step=
     except Exception as e:
         logger.warning(f"⚠️ Could not read {app_context_file} for fallback: {e}")
     
+    # Add UI elements context if available
+    ui_elements_context = ""
+    if use_ui_elements and ui_elements:
+        ui_elements_context = f"\n\nCurrent UI Elements Available:\n{json.dumps(ui_elements, indent=2)}"
+        logger.info(f"📱 Using {len(ui_elements)} UI elements for fallback action")
+    
     # Build context about the failure
     failure_context = ""
     if failed_step:
         failure_context = f"\nThe automation failed at step: {failed_step}"
     
-    prompt = f"""This is a screenshot of the mobile app. The automation failed to find or interact with the expected element.\n\nUser Request: '{user_request}'\n{failure_context}\n\nApp Context:\n{app_context}\n\nBased on the screenshot and app context, what is the next UI action needed to progress toward the user's goal?\n\nYou must respond with a SINGLE JSON object in this exact format. Following is just an exmaple, your answer should be in accordance with the query and app context:\n{{ "action": "click", "target": "text='Button Text'" }}\nOR\n{{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Partial Text')]" }}\nOR\n{{ "action": "type", "value": "text to type" }}\nOR\n{{ "action": "extract", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }}\n\nValid actions: "click", "type", "wait", "extract"\nValid targets: "text='exact text'", "xpath=//path/to/element"\nFor typing: use "value" field instead of "target"\nFor extract: use "target" field with xpath to find elements to extract text from\n\nOnly return the JSON object - no explanations or markdown formatting."""
+    prompt = f"""This is a screenshot of the mobile app. The automation failed to find or interact with the expected element.
+
+User Request: '{user_request}'{failure_context}
+
+App Context:
+{app_context}{ui_elements_context}
+
+Based on the screenshot and app context, what is the next UI action needed to progress toward the user's goal?
+
+You must respond with a SINGLE JSON object in this exact format. Following is just an example, your answer should be in accordance with the query and app context:
+
+{{ "action": "click", "target": "text='Button Text'" }}
+OR
+{{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Partial Text')]" }}
+OR
+{{ "action": "type", "value": "text to type" }}
+OR
+{{ "action": "extract", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }}
+
+Valid actions: "click", "type", "wait", "extract"
+Valid targets: "text='exact text'", "xpath=//path/to/element"
+For typing: use "value" field instead of "target"
+For extract: use "target" field with xpath to find elements to extract text from
+
+Only return the JSON object - no explanations or markdown formatting."""
     
     try:
         response = openai.chat.completions.create(
@@ -175,7 +208,7 @@ def gpt_fallback_action(image_path, user_request, app_context_file, failed_step=
         return None
 
 # === Plan generation ===
-def generate_plan(user_request, app_context_file):
+def generate_plan(user_request, app_context_file, ui_elements=None, use_ui_elements=True):
     logger.info(f"🧠 Generating plan for: '{user_request}'")
     # Read UI text from app context if available
     ui_text = ""
@@ -184,9 +217,16 @@ def generate_plan(user_request, app_context_file):
             ui_text = f.read()
     except Exception as e:
         logger.warning(f"⚠️ Could not read {app_context_file}: {e}")
+    
+    # Add UI elements context if available
+    ui_elements_context = ""
+    if use_ui_elements and ui_elements:
+        ui_elements_context = f"\n\nCurrent UI Elements Available:\n{json.dumps(ui_elements, indent=2)}"
+        logger.info(f"📱 Using {len(ui_elements)} UI elements for planning")
+    
     system_prompt = f"""
 You are a mobile automation planner. The following is a basic flow overview of how major functions work in the app:
-{ui_text}
+{ui_text}{ui_elements_context}
 
 ALWAYS generate a step-by-step plan for navigating the app using uiautomator2 to achieve what the user is asking for.
 If you can't complete the plan, generate a fallback plan that will help the user to complete the task or give them information closest to what they are asking for.
@@ -229,7 +269,7 @@ Only output valid JSON array — no markdown or explanations.
 
 
 # === Main Executor ===
-def execute_plan(d, plan, user_request, app_context_file):
+def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_ui_elements=True):
     i = 0
     failed_nav_fallbacks = 0  # Track consecutive failed click/type fallbacks
     while i < len(plan):
@@ -272,7 +312,15 @@ def execute_plan(d, plan, user_request, app_context_file):
                     # If extraction fails, continue as before
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_click_fallback")
-                    suggestion = gpt_fallback_action(ss, user_request, app_context_file, f"Step {i+1}: {step}")
+                    # Fresh UI extraction for fallback
+                    fresh_ui_elements = None
+                    if use_ui_elements:
+                        from source.filter_ui_elements import extract_ui_elements
+                        xml_str = d.dump_hierarchy(compressed=True)
+                        fresh_ui_elements = extract_ui_elements(xml_str)
+                    else:
+                        fresh_ui_elements = None
+                    suggestion = gpt_fallback_action(ss, user_request, app_context_file, f"Step {i+1}: {step}", fresh_ui_elements, use_ui_elements)
                     logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
@@ -300,7 +348,15 @@ def execute_plan(d, plan, user_request, app_context_file):
                         return suggestion  # EARLY EXIT
                 else:
                     ss = take_screenshot(d, f"step_{i+1}_type_fallback")
-                    suggestion = gpt_fallback_action(ss, user_request, app_context_file, f"Step {i+1}: {step}")
+                    # Fresh UI extraction for fallback
+                    fresh_ui_elements = None
+                    if use_ui_elements:
+                        from source.filter_ui_elements import extract_ui_elements
+                        xml_str = d.dump_hierarchy(compressed=True)
+                        fresh_ui_elements = extract_ui_elements(xml_str)
+                    else:
+                        fresh_ui_elements = None
+                    suggestion = gpt_fallback_action(ss, user_request, app_context_file, f"Step {i+1}: {step}", fresh_ui_elements, use_ui_elements)
                     logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
                     if suggestion and isinstance(suggestion, dict):
                         plan.insert(i+1, suggestion)  # Try the suggestion next
@@ -373,17 +429,31 @@ def main():
         if app_choice not in APP_CONTEXT_FILES:
             print("Invalid choice. Please enter 'uber' or 'zomato'.")
     package_name, app_context_file = APP_CONTEXT_FILES[app_choice]
+    # Set USE_UI_ELEMENTS per app
+    if app_choice == "zomato":
+        use_ui_elements = True
+    else:
+        use_ui_elements = False
     user_prompt = input(f"📝 What do you want to do in {app_choice.title()}?\n> ").strip()
     d = connect_to_device()
     launch_app(d, package_name)
 
     time.sleep(3)
-    xml_str = d.dump_hierarchy(compressed=True)
-    print(extract_ui_elements(xml_str))
+    
+    # Extract UI elements if flag is enabled
+    ui_elements = None
+    if use_ui_elements:
+        xml_str = d.dump_hierarchy(compressed=True)
+        ui_elements = extract_ui_elements(xml_str)
+        logger.info(f"📱 Extracted {len(ui_elements)} UI elements")
+        print("UI Elements:")
+        print(json.dumps(ui_elements, indent=2))
+    else:
+        logger.info("📱 UI elements extraction disabled")
 
-    plan = generate_plan(user_prompt, app_context_file)
+    plan = generate_plan(user_prompt, app_context_file, ui_elements, use_ui_elements)
     if plan:
-        result = execute_plan(d, plan, user_prompt, app_context_file)
+        result = execute_plan(d, plan, user_prompt, app_context_file, ui_elements, use_ui_elements)
         if result is not None:
             logger.info(f"✅ Final Result: {result}")
             return  # Stop further execution after extraction
