@@ -3,16 +3,17 @@ import logging
 
 os.makedirs("logs", exist_ok=True)
 
-def setup_logger():
-    logging.basicConfig(
-        filename="logs/agent.log",
-        filemode="a",
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s"
-    )
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(levelname)s | %(message)s")
-    console.setFormatter(formatter)
-    logging.getLogger().addHandler(console)
-    return logging.getLogger()
+logger = logging.getLogger("agent")
+logger.setLevel(logging.INFO)
+
+# Prevent adding handlers multiple times
+if not logger.handlers:
+    # File handler
+    file_handler = logging.FileHandler("logs/agent.log", mode="a")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+    logger.addHandler(file_handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter("%(levelname)s | %(message)s"))
+    logger.addHandler(console_handler)
