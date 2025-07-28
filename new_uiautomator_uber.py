@@ -49,10 +49,15 @@ def take_screenshot(d, label="fallback"):
     logger.info(f"🖼️ Screenshot size: {os.path.getsize(path) / 1024:.2f} KB")
     return path
 
-def gpt_fallback(image_path, user_request, app_context_file):
-    with open(image_path, "rb") as f:
-        b64_img = base64.b64encode(f.read()).decode("utf-8")
-
+def gpt_fallback(d, user_request, app_context_file, initial_screenshot_path=None):
+    """
+    GPT fallback with scrolling loop for extraction
+    Args:
+        d: uiautomator2 device object
+        user_request: user's request for extraction
+        app_context_file: path to app context file
+        initial_screenshot_path: optional initial screenshot path (if already taken)
+    """
     # Read app context for better understanding
     app_context = ""
     try:
@@ -62,40 +67,86 @@ def gpt_fallback(image_path, user_request, app_context_file):
         logger.warning(f"⚠️ Could not read {app_context_file} for fallback: {e}")
 
     # Use a more specific prompt with app context
-    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.\n\nApp Context:\n{app_context}\n\nExtract the most relevant information from the screenshot to fulfill the user's request. \nLook for prices, times, availability or any information that matches what the user is asking for.\n\nOnly reply with the extracted value. And add concise explantion of your answer."""
+    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.\n\nApp Context:\n{app_context}\n\nExtract the most relevant information from the screenshot to fulfill the user's request. \nLook for prices, times, availability or any information that matches what the user is asking for.\n\nOnly reply with the extracted value. And add concise explanation of your answer."""
 
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a mobile automation assistant. Extract only the requested information from the screenshot. Return only the value, no explanations."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        { "type": "text", "text": prompt },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{b64_img}",
-                                "detail": "high"
+    # Scrolling loop: 5 turns maximum
+    for scroll_turn in range(5):
+        logger.info(f"🔄 GPT Fallback Scroll Turn {scroll_turn + 1}/5")
+        
+        # Take screenshot for current scroll position
+        if scroll_turn == 0 and initial_screenshot_path:
+            # Use the initial screenshot if provided
+            image_path = initial_screenshot_path
+        else:
+            # Take new screenshot
+            image_path = take_screenshot(d, f"gpt_fallback_scroll_{scroll_turn}")
+        
+        # Process screenshot with GPT
+        try:
+            with open(image_path, "rb") as f:
+                b64_img = base64.b64encode(f.read()).decode("utf-8")
+
+            response = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a mobile automation assistant. Extract only the requested information from the screenshot. Return only the value, no explanations."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": prompt },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{b64_img}",
+                                    "detail": "high"
+                                }
                             }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=150,
-            temperature=0.1
-        )
-        raw = response.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"```[a-zA-Z]*", "", raw).strip("`").strip()
-        return raw
-    except Exception as e:
-        logger.error(f"❌ GPT fallback failed: {e}")
-        return None
+                        ]
+                    }
+                ],
+                max_tokens=150,
+                temperature=0.1
+            )
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"```[a-zA-Z]*", "", raw).strip("`").strip()
+            
+            # Check if we got a meaningful result
+            if raw and raw.lower() not in ["none", "not found", "no information", "n/a", ""]:
+                logger.info(f"✅ GPT found answer on scroll turn {scroll_turn + 1}: {raw}")
+                return raw
+            
+            logger.info(f"⚠️ No meaningful answer found on scroll turn {scroll_turn + 1}")
+            
+        except Exception as e:
+            logger.error(f"❌ GPT fallback failed on scroll turn {scroll_turn + 1}: {e}")
+        
+        # Scroll down for next iteration (except on last turn)
+        if scroll_turn < 4:  # Don't scroll on the last turn
+            try:
+                # Get screen dimensions for scrolling
+                screen_width = d.window_size()[0]
+                screen_height = d.window_size()[1]
+                
+                # Scroll from middle to top (swipe up)
+                start_x = screen_width // 2
+                start_y = int(screen_height * 0.8)  # 80% down
+                end_x = screen_width // 2
+                end_y = int(screen_height * 0.2)    # 20% down
+                
+                logger.info(f"📱 Scrolling: ({start_x}, {start_y}) → ({end_x}, {end_y})")
+                d.swipe(start_x, start_y, end_x, end_y, duration=0.5)
+                time.sleep(1)  # Wait for scroll animation
+                
+            except Exception as e:
+                logger.error(f"❌ Scrolling failed on turn {scroll_turn + 1}: {e}")
+                break
+    
+    logger.warning("⚠️ No answer found after 5 scroll attempts")
+    return None
 
 def gpt_fallback_action(image_path, user_request, app_context_file, failed_step=None, ui_elements=None, use_ui_elements=True):
     with open(image_path, "rb") as f:
@@ -240,8 +291,13 @@ Each step should be:
   {{ "action": "type", "value": "Wireless Headphones" }},
   {{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Wireless Headphones')]" }},
   {{ "action": "wait", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }},
-  {{ "action": "extract", "target": "xpath=(//android.widget.TextView[contains(@text, '$')])[1]" }}
+  {{ "action": "extract", "query": "find the price of Wireless Headphones" }}
 ]
+
+IMPORTANT: For extraction steps, use "query" field with natural language instead of "target" with XPath. The extraction will use screenshot analysis with scrolling to find the information.
+
+Valid actions: "click", "type", "wait", "extract"
+For extract: use "query" field with natural language description of what to find
 
 Only output valid JSON array — no markdown or explanations.
 """
@@ -312,58 +368,29 @@ def handle_wait_action(d, target):
     xpath_val = target.replace("xpath=", "")
     return d.xpath(xpath_val).wait(timeout=10)
 
-def handle_extract_action(d, target, user_request, step_index, app_context_file):
-    """Handle extract action with retry logic"""
-    if not target or not target.startswith("xpath="):
+def handle_extract_action(d, query, user_request, step_index, app_context_file):
+    """Handle extract action - always screenshot-based with scrolling"""
+    logger.info(f"📸 Starting screenshot-based extraction")
+    logger.info(f"   User request: '{user_request}'")
+    logger.info(f"   Step query: '{query}'")
+    
+    # Combine user request and step query for better context
+    combined_query = f"User wants: {user_request}. Specifically looking for: {query}"
+    
+    # Wait 2 seconds before first screenshot to let app render
+    logger.info("⏳ Waiting 2 seconds before first screenshot...")
+    time.sleep(2)
+    
+    # Take initial screenshot and use GPT fallback with scrolling
+    ss = take_screenshot(d, f"step_{step_index+1}_extract")
+    result = gpt_fallback(d, combined_query, app_context_file, ss)
+    
+    if result:
+        logger.info(f"✅ Extracted Value: {result}")
+        return result
+    else:
+        logger.warning(f"⚠️ No answer found for: '{combined_query}' after scrolling")
         return None
-    
-    xpath_val = target.replace("xpath=", "")
-    
-    # First attempt
-    try:
-        elems = d.xpath(xpath_val).all()
-        logger.info(f" Found {len(elems)} matching elements while searching for: '{user_request}'")
-        
-        for i_elem, e in enumerate(elems):
-            try:
-                txt = e.get_text()
-                logger.info(f"[{i_elem}] → {txt}")
-                if i_elem == 0:
-                    logger.info(f"✅ Extracted Value: {txt}")
-                    return txt
-            except Exception as ex:
-                logger.error(f"❌ Couldn't extract from {i_elem}: {ex}")
-        
-        raise Exception("No valid value matched")
-    
-    except Exception as e:
-        # Retry logic: wait up to 15s for any value to appear
-        logger.info(f"⏳ Waiting for the relevant value for: '{user_request}' to appear...")
-        
-        for retry in range(7):  # 7*2s = 14s
-            time.sleep(2)
-            elems = d.xpath(xpath_val).all()
-            
-            if elems:
-                logger.info(f"🔍 Retry {retry+1}: Found {len(elems)} matching elements while searching for: '{user_request}'")
-                
-                for i_elem, e in enumerate(elems):
-                    try:
-                        txt = e.get_text()
-                        logger.info(f"[{i_elem}] → {txt}")
-                        if i_elem == 0:
-                            logger.info(f"✅ Extracted Value: {txt}")
-                            return txt
-                    except Exception as ex:
-                        logger.error(f"❌ Couldn't extract from {i_elem}: {ex}")
-                break
-        
-        # Final fallback with GPT
-        logger.warning(f"⚠️ Step failed: No valid value matched for: '{user_request}' after retries")
-        ss = take_screenshot(d, f"step_{step_index+1}_fallback")
-        suggestion = gpt_fallback(ss, user_request, app_context_file)
-        logger.info(f"🤖 GPT Extracted: {suggestion}")
-        return suggestion
 
 def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elements, use_ui_elements, failed_nav_fallbacks):
     """Handle fallback logic for failed actions"""
@@ -371,7 +398,7 @@ def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elem
         # Switch to extraction fallback after too many navigation failures
         logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
         ss = take_screenshot(d, f"step_{step_index+1}_extract_fallback")
-        suggestion = gpt_fallback(ss, user_request, app_context_file)
+        suggestion = gpt_fallback(d, user_request, app_context_file, ss)
         logger.info(f"🤖 GPT Extracted: {suggestion}")
         if suggestion:
             logger.info(f"✅ Final Result: {suggestion}")
@@ -438,7 +465,8 @@ def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_
                 logger.warning("⚠️ Step failed: Wait failed: XPath not visible")
             
         elif action == "extract":
-            result = handle_extract_action(d, target, user_request, i, app_context_file)
+            query = step.get("query")
+            result = handle_extract_action(d, query, user_request, i, app_context_file)
             if result is not None:
                 return result  # Early exit with extracted value
             success = True  # Consider extract as "successful" even if it falls back to GPT
