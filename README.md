@@ -10,6 +10,14 @@ An intelligent Android test automation framework that uses AI-powered screenshot
 - **Multi-App Support**: Configurable for different Android applications
 - **Context-Aware**: App-specific context files for better automation accuracy
 
+## 🎥 Demo Video
+
+Watch the AI Test Automation framework in action:
+
+[![AI Test Automation Demo](https://drive.google.com/uc?export=view&id=1Y70Th-t7weNaakPZLS9IamXxcrygsgg3)](https://drive.google.com/file/d/1Y70Th-t7weNaakPZLS9IamXxcrygsgg3/view?usp=sharing)
+
+_Click the image above to watch the full demo video_
+
 ## 📋 Prerequisites
 
 - Python 3.8+
