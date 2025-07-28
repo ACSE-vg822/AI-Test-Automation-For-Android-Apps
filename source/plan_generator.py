@@ -2,6 +2,7 @@ import json
 import re
 import openai
 from source.logger import logger
+from source.memory_state import memory_state
 
 def parse_plan(plan):
     """Parse plan and remove wait actions that come right before extract actions"""
@@ -30,22 +31,22 @@ def parse_plan(plan):
     
     return parsed_plan
 
-def generate_plan(user_request, app_context_file, ui_elements=None, use_ui_elements=True):
+def generate_plan():
     """Generate a step-by-step automation plan using GPT."""
-    logger.info(f"🧠 Generating plan for: '{user_request}'")
+    logger.info(f"🧠 Generating plan for: '{memory_state.current_user_request}'")
     # Read UI text from app context if available
     ui_text = ""
     try:
-        with open(app_context_file, "r", encoding="utf-8") as f:
+        with open(memory_state.current_app_context_file, "r", encoding="utf-8") as f:
             ui_text = f.read()
     except Exception as e:
-        logger.warning(f"⚠️ Could not read {app_context_file}: {e}")
+        logger.warning(f"⚠️ Could not read {memory_state.current_app_context_file}: {e}")
     
     # Add UI elements context if available
     ui_elements_context = ""
-    if use_ui_elements and ui_elements:
-        ui_elements_context = f"\n\nCurrent UI Elements Available:\n{json.dumps(ui_elements, indent=2)}"
-        logger.info(f"📱 Using {len(ui_elements)} UI elements for planning")
+    if memory_state.current_use_ui_elements and memory_state.current_ui_elements:
+        ui_elements_context = f"\n\nCurrent UI Elements Available:\n{json.dumps(memory_state.current_ui_elements, indent=2)}"
+        logger.info(f"📱 Using {len(memory_state.current_ui_elements)} UI elements for planning")
     
     system_prompt = f"""
 You are a mobile automation planner. The following is a basic flow overview of how major functions work in the app:
@@ -77,7 +78,7 @@ Only output valid JSON array — no markdown or explanations.
         model="gpt-4o",
         messages=[
             { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_request }
+            { "role": "user", "content": memory_state.current_user_request }
         ],
         max_tokens=500,
         temperature=0.2

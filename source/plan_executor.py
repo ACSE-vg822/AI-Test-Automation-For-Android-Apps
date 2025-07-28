@@ -3,6 +3,7 @@ import re
 from source.logger import logger
 from source.screenshot_manager import take_screenshot
 from source.gpt_fallback import gpt_fallback, gpt_fallback_action
+from source.memory_state import memory_state
 
 # === Action Handlers ===
 def handle_click_action(d, target):
@@ -49,14 +50,14 @@ def handle_wait_action(d, target):
     xpath_val = target.replace("xpath=", "")
     return d.xpath(xpath_val).wait(timeout=10)
 
-def handle_extract_action(d, query, user_request, step_index, app_context_file):
+def handle_extract_action(d, query, step_index):
     """Handle extract action - always screenshot-based with scrolling"""
     logger.info(f"📸 Starting screenshot-based extraction")
-    logger.info(f"   User request: '{user_request}'")
+    logger.info(f"   User request: '{memory_state.current_user_request}'")
     logger.info(f"   Step query: '{query}'")
     
     # Combine user request and step query for better context
-    combined_query = f"User wants: {user_request}. Specifically looking for: {query}"
+    combined_query = f"User wants: {memory_state.current_user_request}. Specifically looking for: {query}"
     
     # Wait 2 seconds before first screenshot to let app render
     logger.info("⏳ Waiting 5 seconds before first screenshot...")
@@ -64,7 +65,7 @@ def handle_extract_action(d, query, user_request, step_index, app_context_file):
     
     # Take initial screenshot and use GPT fallback with scrolling
     ss = take_screenshot(d, f"step_{step_index+1}_extract")
-    result = gpt_fallback(d, combined_query, app_context_file, ss)
+    result = gpt_fallback(d, combined_query, memory_state.current_app_context_file, ss)
     
     if result:
         logger.info(f"✅ Extracted Value: {result}")
@@ -73,13 +74,13 @@ def handle_extract_action(d, query, user_request, step_index, app_context_file):
         logger.warning(f"⚠️ No answer found for: '{combined_query}' after scrolling")
         return None
 
-def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elements, use_ui_elements, failed_nav_fallbacks):
+def handle_fallback(d, step, step_index):
     """Handle fallback logic for failed actions"""
-    if failed_nav_fallbacks >= 2:
+    if memory_state.failed_nav_fallbacks >= 2:
         # Switch to extraction fallback after too many navigation failures
         logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
         ss = take_screenshot(d, f"step_{step_index+1}_extract_fallback")
-        suggestion = gpt_fallback(d, user_request, app_context_file, ss)
+        suggestion = gpt_fallback(d, memory_state.current_user_request, memory_state.current_app_context_file, ss)
         logger.info(f"🤖 GPT Extracted: {suggestion}")
         if suggestion:
             logger.info(f"✅ Final Result: {suggestion}")
@@ -90,14 +91,14 @@ def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elem
         
         # Fresh UI extraction for fallback
         fresh_ui_elements = None
-        if use_ui_elements:
+        if memory_state.current_use_ui_elements:
             from source.filter_ui_elements import extract_ui_elements
             xml_str = d.dump_hierarchy(compressed=True)
             fresh_ui_elements = extract_ui_elements(xml_str)
         
         suggestion = gpt_fallback_action(
-            d, user_request, app_context_file, 
-            f"Step {step_index+1}: {step}", fresh_ui_elements, use_ui_elements, ss
+            d, memory_state.current_user_request, memory_state.current_app_context_file, 
+            f"Step {step_index+1}: {step}", fresh_ui_elements, memory_state.current_use_ui_elements, ss
         )
         logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
         
@@ -108,9 +109,9 @@ def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elem
     
     return None, False
 
-def get_fresh_ui_elements(d, use_ui_elements):
+def get_fresh_ui_elements(d):
     """Get fresh UI elements if enabled"""
-    if not use_ui_elements:
+    if not memory_state.current_use_ui_elements:
         return None
     
     from source.filter_ui_elements import extract_ui_elements
@@ -118,13 +119,15 @@ def get_fresh_ui_elements(d, use_ui_elements):
     return extract_ui_elements(xml_str)
 
 # === Main Executor ===
-def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_ui_elements=True):
+def execute_plan(d):
     """Execute the automation plan with fallback handling"""
     i = 0
-    failed_nav_fallbacks = 0  # Track consecutive failed click/type fallbacks
+    memory_state.failed_nav_fallbacks = 0  # Reset failed navigation fallbacks
+    memory_state.current_step_index = 0
     
-    while i < len(plan):
-        step = plan[i]
+    while i < len(memory_state.current_plan):
+        step = memory_state.current_plan[i]
+        memory_state.current_step_index = i
         logger.info(f"\n➡️ Step {i+1}: {step}")
         
         action = step.get("action")
@@ -147,7 +150,7 @@ def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_
                 logger.warning("⚠️ Step failed: Wait failed: XPath not visible")
             
         elif action == "extract":
-            result = handle_extract_action(d, query, user_request, i, app_context_file)
+            result = handle_extract_action(d, query, i)
             if result is not None:
                 return result  # Early exit with extracted value
             success = True  # Consider extract as "successful" even if it falls back to GPT
@@ -158,22 +161,19 @@ def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_
         
         # Handle failures with fallback logic
         if not success:
-            failed_nav_fallbacks += 1
-            fallback_result, should_exit = handle_fallback(
-                d, step, i, user_request, app_context_file, 
-                ui_elements, use_ui_elements, failed_nav_fallbacks
-            )
+            memory_state.failed_nav_fallbacks += 1
+            fallback_result, should_exit = handle_fallback(d, step, i)
             
             if should_exit:
                 return fallback_result  # Early exit
             
             if fallback_result:
-                plan.insert(i+1, fallback_result)  # Insert suggestion for next iteration
+                memory_state.current_plan.insert(i+1, fallback_result)  # Insert suggestion for next iteration
             
             i += 1
             continue
         else:
-            failed_nav_fallbacks = 0  # Reset on success
+            memory_state.failed_nav_fallbacks = 0  # Reset on success
         
         i += 1
     

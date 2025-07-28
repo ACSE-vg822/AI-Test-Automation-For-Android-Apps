@@ -6,14 +6,10 @@ from source.device_manager import connect_to_device, launch_app
 from source.plan_generator import generate_plan, parse_plan
 from source.plan_executor import execute_plan
 from source.filter_ui_elements import extract_ui_elements
-
-# === Memory State ===
-# Store the generated plan for logging and modification
-current_plan = None
+from source.memory_state import memory_state
 
 def main():
     """Main executor function that orchestrates the entire automation flow."""
-    global current_plan
     
     app_choice = ""
     while app_choice not in APP_CONTEXT_FILES:
@@ -44,26 +40,35 @@ def main():
     else:
         logger.info("📱 UI elements extraction disabled")
 
+    # Set memory state
+    memory_state.current_user_request = user_prompt
+    memory_state.current_app_context_file = app_context_file
+    memory_state.current_ui_elements = ui_elements
+    memory_state.current_use_ui_elements = use_ui_elements
+
     # Generate raw plan
-    raw_plan = generate_plan(user_prompt, app_context_file, ui_elements, use_ui_elements)
+    raw_plan = generate_plan()
     
     if raw_plan:
         # Store raw plan in memory state
-        current_plan = raw_plan
+        memory_state.current_plan = raw_plan
         
         # Log raw plan
         logger.info("📋 Raw Plan Generated:")
         logger.info(json.dumps(raw_plan, indent=2))
         
         # Parse and remove unnecessary wait actions
-        parsed_plan = parse_plan(raw_plan)
+        parsed_plan = parse_plan(memory_state.current_plan)
         
         # Log parsed plan
         logger.info("🔧 Parsed Plan (after removing wait before extract):")
         logger.info(json.dumps(parsed_plan, indent=2))
         
+        # Update the parsed plan in memory state
+        memory_state.current_plan = parsed_plan
+        
         # Execute the parsed plan
-        result = execute_plan(d, parsed_plan, user_prompt, app_context_file, ui_elements, use_ui_elements)
+        result = execute_plan(d)
         if result is not None:
             logger.info(f"✅ Final Result: {result}")
             return  # Stop further execution after extraction
