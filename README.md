@@ -14,9 +14,9 @@ An intelligent Android test automation framework that uses AI-powered screenshot
 
 Watch the AI Test Automation framework in action:
 
-[![AI Test Automation Demo](https://drive.google.com/uc?export=view&id=1Y70Th-t7weNaakPZLS9IamXxcrygsgg3)](https://drive.google.com/file/d/1Y70Th-t7weNaakPZLS9IamXxcrygsgg3/view?usp=sharing)
+📥 **[Download Demo Video](https://drive.google.com/file/d/1Y70Th-t7weNaakPZLS9IamXxcrygsgg3/view?usp=sharing)**
 
-_Click the image above to watch the full demo video_
+_Note: The demo video is available on Google Drive. Click the link above to watch the full demo._
 
 ## 📋 Prerequisites
 
