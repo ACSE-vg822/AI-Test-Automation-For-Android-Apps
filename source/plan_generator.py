@@ -3,6 +3,33 @@ import re
 import openai
 from source.logger import logger
 
+def parse_plan(plan):
+    """Parse plan and remove wait actions that come right before extract actions"""
+    if not plan:
+        return plan
+    
+    parsed_plan = []
+    i = 0
+    
+    while i < len(plan):
+        current_step = plan[i]
+        
+        # Check if current step is wait and next step is extract
+        if (i < len(plan) - 1 and 
+            current_step.get("action") == "wait" and 
+            plan[i + 1].get("action") == "extract"):
+            
+            logger.info(f"🗑️ Removing wait action before extract: {current_step}")
+            # Skip the wait action, keep the extract action
+            i += 1
+            parsed_plan.append(plan[i])
+        else:
+            parsed_plan.append(current_step)
+        
+        i += 1
+    
+    return parsed_plan
+
 def generate_plan(user_request, app_context_file, ui_elements=None, use_ui_elements=True):
     """Generate a step-by-step automation plan using GPT."""
     logger.info(f"🧠 Generating plan for: '{user_request}'")
@@ -36,8 +63,13 @@ Each step should be:
   {{ "action": "type", "value": "Wireless Headphones" }},
   {{ "action": "click", "target": "xpath=//android.widget.TextView[contains(@text, 'Wireless Headphones')]" }},
   {{ "action": "wait", "target": "xpath=//android.widget.TextView[contains(@text, '$')]" }},
-  {{ "action": "extract", "target": "xpath=(//android.widget.TextView[contains(@text, '$')])[1]" }}
+  {{ "action": "extract", "query": "find the price of Wireless Headphones" }}
 ]
+
+IMPORTANT: For extraction steps, use "query" field with natural language instead of "target" with XPath. The extraction will use screenshot analysis with scrolling to find the information.
+
+Valid actions: "click", "type", "wait", "extract"
+For extract: use "query" field with natural language description of what to find
 
 Only output valid JSON array — no markdown or explanations.
 """

@@ -49,58 +49,29 @@ def handle_wait_action(d, target):
     xpath_val = target.replace("xpath=", "")
     return d.xpath(xpath_val).wait(timeout=10)
 
-def handle_extract_action(d, target, user_request, step_index, app_context_file):
-    """Handle extract action with retry logic"""
-    if not target or not target.startswith("xpath="):
+def handle_extract_action(d, query, user_request, step_index, app_context_file):
+    """Handle extract action - always screenshot-based with scrolling"""
+    logger.info(f"📸 Starting screenshot-based extraction")
+    logger.info(f"   User request: '{user_request}'")
+    logger.info(f"   Step query: '{query}'")
+    
+    # Combine user request and step query for better context
+    combined_query = f"User wants: {user_request}. Specifically looking for: {query}"
+    
+    # Wait 2 seconds before first screenshot to let app render
+    logger.info("⏳ Waiting 5 seconds before first screenshot...")
+    time.sleep(5)
+    
+    # Take initial screenshot and use GPT fallback with scrolling
+    ss = take_screenshot(d, f"step_{step_index+1}_extract")
+    result = gpt_fallback(d, combined_query, app_context_file, ss)
+    
+    if result:
+        logger.info(f"✅ Extracted Value: {result}")
+        return result
+    else:
+        logger.warning(f"⚠️ No answer found for: '{combined_query}' after scrolling")
         return None
-    
-    xpath_val = target.replace("xpath=", "")
-    
-    # First attempt
-    try:
-        elems = d.xpath(xpath_val).all()
-        logger.info(f" Found {len(elems)} matching elements while searching for: '{user_request}'")
-        
-        for i_elem, e in enumerate(elems):
-            try:
-                txt = e.get_text()
-                logger.info(f"[{i_elem}] → {txt}")
-                if i_elem == 0:
-                    logger.info(f"✅ Extracted Value: {txt}")
-                    return txt
-            except Exception as ex:
-                logger.error(f"❌ Couldn't extract from {i_elem}: {ex}")
-        
-        raise Exception("No valid value matched")
-    
-    except Exception as e:
-        # Retry logic: wait up to 15s for any value to appear
-        logger.info(f"⏳ Waiting for the relevant value for: '{user_request}' to appear...")
-        
-        for retry in range(7):  # 7*2s = 14s
-            time.sleep(2)
-            elems = d.xpath(xpath_val).all()
-            
-            if elems:
-                logger.info(f"🔍 Retry {retry+1}: Found {len(elems)} matching elements while searching for: '{user_request}'")
-                
-                for i_elem, e in enumerate(elems):
-                    try:
-                        txt = e.get_text()
-                        logger.info(f"[{i_elem}] → {txt}")
-                        if i_elem == 0:
-                            logger.info(f"✅ Extracted Value: {txt}")
-                            return txt
-                    except Exception as ex:
-                        logger.error(f"❌ Couldn't extract from {i_elem}: {ex}")
-                break
-        
-        # Final fallback with GPT
-        logger.warning(f"⚠️ Step failed: No valid value matched for: '{user_request}' after retries")
-        ss = take_screenshot(d, f"step_{step_index+1}_fallback")
-        suggestion = gpt_fallback(ss, user_request, app_context_file)
-        logger.info(f"🤖 GPT Extracted: {suggestion}")
-        return suggestion
 
 def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elements, use_ui_elements, failed_nav_fallbacks):
     """Handle fallback logic for failed actions"""
@@ -108,7 +79,7 @@ def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elem
         # Switch to extraction fallback after too many navigation failures
         logger.info("🔄 Too many navigation failures, switching to extraction fallback!")
         ss = take_screenshot(d, f"step_{step_index+1}_extract_fallback")
-        suggestion = gpt_fallback(ss, user_request, app_context_file)
+        suggestion = gpt_fallback(d, user_request, app_context_file, ss)
         logger.info(f"🤖 GPT Extracted: {suggestion}")
         if suggestion:
             logger.info(f"✅ Final Result: {suggestion}")
@@ -125,8 +96,8 @@ def handle_fallback(d, step, step_index, user_request, app_context_file, ui_elem
             fresh_ui_elements = extract_ui_elements(xml_str)
         
         suggestion = gpt_fallback_action(
-            ss, user_request, app_context_file, 
-            f"Step {step_index+1}: {step}", fresh_ui_elements, use_ui_elements
+            d, user_request, app_context_file, 
+            f"Step {step_index+1}: {step}", fresh_ui_elements, use_ui_elements, ss
         )
         logger.info(f"🤖 GPT Fallback Suggestion: {suggestion}")
         
@@ -159,6 +130,7 @@ def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_
         action = step.get("action")
         target = step.get("target")
         value = step.get("value")
+        query = step.get("query")
         
         success = False
         
@@ -175,7 +147,7 @@ def execute_plan(d, plan, user_request, app_context_file, ui_elements=None, use_
                 logger.warning("⚠️ Step failed: Wait failed: XPath not visible")
             
         elif action == "extract":
-            result = handle_extract_action(d, target, user_request, i, app_context_file)
+            result = handle_extract_action(d, query, user_request, i, app_context_file)
             if result is not None:
                 return result  # Early exit with extracted value
             success = True  # Consider extract as "successful" even if it falls back to GPT

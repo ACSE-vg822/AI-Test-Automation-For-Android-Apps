@@ -3,12 +3,18 @@ import json
 from source.logger import logger
 from source.config import APP_CONTEXT_FILES, get_ui_elements_setting
 from source.device_manager import connect_to_device, launch_app
-from source.plan_generator import generate_plan
+from source.plan_generator import generate_plan, parse_plan
 from source.plan_executor import execute_plan
 from source.filter_ui_elements import extract_ui_elements
 
+# === Memory State ===
+# Store the generated plan for logging and modification
+current_plan = None
+
 def main():
     """Main executor function that orchestrates the entire automation flow."""
+    global current_plan
+    
     app_choice = ""
     while app_choice not in APP_CONTEXT_FILES:
         app_choice = input("Which app do you want to automate? (uber/zomato): ").strip().lower()
@@ -38,10 +44,26 @@ def main():
     else:
         logger.info("📱 UI elements extraction disabled")
 
-    # Generate and execute plan
-    plan = generate_plan(user_prompt, app_context_file, ui_elements, use_ui_elements)
-    if plan:
-        result = execute_plan(d, plan, user_prompt, app_context_file, ui_elements, use_ui_elements)
+    # Generate raw plan
+    raw_plan = generate_plan(user_prompt, app_context_file, ui_elements, use_ui_elements)
+    
+    if raw_plan:
+        # Store raw plan in memory state
+        current_plan = raw_plan
+        
+        # Log raw plan
+        logger.info("📋 Raw Plan Generated:")
+        logger.info(json.dumps(raw_plan, indent=2))
+        
+        # Parse and remove unnecessary wait actions
+        parsed_plan = parse_plan(raw_plan)
+        
+        # Log parsed plan
+        logger.info("🔧 Parsed Plan (after removing wait before extract):")
+        logger.info(json.dumps(parsed_plan, indent=2))
+        
+        # Execute the parsed plan
+        result = execute_plan(d, parsed_plan, user_prompt, app_context_file, ui_elements, use_ui_elements)
         if result is not None:
             logger.info(f"✅ Final Result: {result}")
             return  # Stop further execution after extraction
