@@ -26,6 +26,10 @@ APP_CONTEXT_FILES = {
     "zomato": (ZOMATO_PACKAGE, "app_context/zomato.txt")
 }
 
+# === Memory State ===
+# Store the generated plan for logging and modification
+current_plan = None
+
 # Setup logging
 # logger is already imported from source.logger
 
@@ -259,6 +263,33 @@ Only return the JSON object - no explanations or markdown formatting."""
         return None
 
 # === Plan generation ===
+def parse_plan(plan):
+    """Parse plan and remove wait actions that come right before extract actions"""
+    if not plan:
+        return plan
+    
+    parsed_plan = []
+    i = 0
+    
+    while i < len(plan):
+        current_step = plan[i]
+        
+        # Check if current step is wait and next step is extract
+        if (i < len(plan) - 1 and 
+            current_step.get("action") == "wait" and 
+            plan[i + 1].get("action") == "extract"):
+            
+            logger.info(f"🗑️ Removing wait action before extract: {current_step}")
+            # Skip the wait action, keep the extract action
+            i += 1
+            parsed_plan.append(plan[i])
+        else:
+            parsed_plan.append(current_step)
+        
+        i += 1
+    
+    return parsed_plan
+
 def generate_plan(user_request, app_context_file, ui_elements=None, use_ui_elements=True):
     logger.info(f"🧠 Generating plan for: '{user_request}'")
     # Read UI text from app context if available
@@ -378,8 +409,8 @@ def handle_extract_action(d, query, user_request, step_index, app_context_file):
     combined_query = f"User wants: {user_request}. Specifically looking for: {query}"
     
     # Wait 2 seconds before first screenshot to let app render
-    logger.info("⏳ Waiting 2 seconds before first screenshot...")
-    time.sleep(2)
+    logger.info("⏳ Waiting 5 seconds before first screenshot...")
+    time.sleep(5)
     
     # Take initial screenshot and use GPT fallback with scrolling
     ss = take_screenshot(d, f"step_{step_index+1}_extract")
@@ -529,9 +560,27 @@ def main():
     else:
         logger.info("📱 UI elements extraction disabled")
 
-    plan = generate_plan(user_prompt, app_context_file, ui_elements, use_ui_elements)
-    if plan:
-        result = execute_plan(d, plan, user_prompt, app_context_file, ui_elements, use_ui_elements)
+    # Generate raw plan
+    raw_plan = generate_plan(user_prompt, app_context_file, ui_elements, use_ui_elements)
+    
+    if raw_plan:
+        # Store raw plan in memory state
+        global current_plan
+        current_plan = raw_plan
+        
+        # Log raw plan
+        logger.info("📋 Raw Plan Generated:")
+        logger.info(json.dumps(raw_plan, indent=2))
+        
+        # Parse and remove unnecessary wait actions
+        parsed_plan = parse_plan(raw_plan)
+        
+        # Log parsed plan
+        logger.info("🔧 Parsed Plan (after removing wait before extract):")
+        logger.info(json.dumps(parsed_plan, indent=2))
+        
+        # Execute the parsed plan
+        result = execute_plan(d, parsed_plan, user_prompt, app_context_file, ui_elements, use_ui_elements)
         if result is not None:
             logger.info(f"✅ Final Result: {result}")
             return  # Stop further execution after extraction
