@@ -71,7 +71,7 @@ def gpt_fallback(d, user_request, app_context_file, initial_screenshot_path=None
         logger.warning(f"⚠️ Could not read {app_context_file} for fallback: {e}")
 
     # Use a more specific prompt with app context
-    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.\n\nApp Context:\n{app_context}\n\nExtract the most relevant information from the screenshot to fulfill the user's request. \nLook for prices, times, availability or any information that matches what the user is asking for.\n\nOnly reply with the extracted value. And add concise explanation of your answer."""
+    prompt = f"""This is a screenshot of the mobile app. The user request is: '{user_request}'.\n\nApp Context:\n{app_context}\n\nExtract the most relevant information from the screenshot to fulfill the user's request. \nLook for prices, times, availability or any information that matches what the user is asking for.\n\nIMPORTANT: You must respond with a JSON object in this exact format:\n{{"answer": "extracted value or NOT_FOUND", "found": true/false}}\n\nSet "found" to true only if you found the specific information the user is asking for. Set "found" to false if the information is not visible or not what the user requested."""
 
     # Scrolling loop: 5 turns maximum
     for scroll_turn in range(5):
@@ -81,9 +81,11 @@ def gpt_fallback(d, user_request, app_context_file, initial_screenshot_path=None
         if scroll_turn == 0 and initial_screenshot_path:
             # Use the initial screenshot if provided
             image_path = initial_screenshot_path
+            logger.info(f"📸 Using initial screenshot: {image_path}")
         else:
             # Take new screenshot
             image_path = take_screenshot(d, f"gpt_fallback_scroll_{scroll_turn}")
+            logger.info(f"📸 Taking new screenshot: {image_path}")
         
         # Process screenshot with GPT
         try:
@@ -118,12 +120,26 @@ def gpt_fallback(d, user_request, app_context_file, initial_screenshot_path=None
             if raw.startswith("```"):
                 raw = re.sub(r"```[a-zA-Z]*", "", raw).strip("`").strip()
             
-            # Check if we got a meaningful result
-            if raw and raw.lower() not in ["none", "not found", "no information", "n/a", ""]:
-                logger.info(f"✅ GPT found answer on scroll turn {scroll_turn + 1}: {raw}")
-                return raw
-            
-            logger.info(f"⚠️ No meaningful answer found on scroll turn {scroll_turn + 1}")
+            # Parse JSON response
+            try:
+                result = json.loads(raw)
+                answer = result.get("answer", "")
+                found = result.get("found", False)
+                
+                if found and answer and answer.lower() != "not_found":
+                    logger.info(f"✅ GPT found answer on scroll turn {scroll_turn + 1}: {answer}")
+                    return answer
+                else:
+                    logger.info(f"⚠️ No meaningful answer found on scroll turn {scroll_turn + 1}: {answer}")
+                    
+            except json.JSONDecodeError:
+                # Fallback for non-JSON responses
+                logger.warning(f"⚠️ GPT returned non-JSON response: {raw}")
+                if raw and raw.lower() not in ["none", "not found", "no information", "n/a", "", "not_found"]:
+                    logger.info(f"✅ GPT found answer on scroll turn {scroll_turn + 1}: {raw}")
+                    return raw
+                else:
+                    logger.info(f"⚠️ No meaningful answer found on scroll turn {scroll_turn + 1}: {raw}")
             
         except Exception as e:
             logger.error(f"❌ GPT fallback failed on scroll turn {scroll_turn + 1}: {e}")
@@ -135,15 +151,16 @@ def gpt_fallback(d, user_request, app_context_file, initial_screenshot_path=None
                 screen_width = d.window_size()[0]
                 screen_height = d.window_size()[1]
                 
-                # Scroll from middle to top (swipe up)
+                # Scroll up in the ride selection area (bottom half of screen)
                 start_x = screen_width // 2
-                start_y = int(screen_height * 0.8)  # 80% down
+                start_y = int(screen_height * 0.8)  # 80% down 
                 end_x = screen_width // 2
-                end_y = int(screen_height * 0.2)    # 20% down
+                end_y = int(screen_height * 0.4)    # 40% down 
                 
                 logger.info(f"📱 Scrolling: ({start_x}, {start_y}) → ({end_x}, {end_y})")
-                d.swipe(start_x, start_y, end_x, end_y, duration=0.5)
-                time.sleep(1)  # Wait for scroll animation
+                d.swipe(start_x, start_y, end_x, end_y, duration=0.8)
+                time.sleep(2)  # Wait longer for scroll animation and content to load
+                logger.info(f"✅ Scroll completed for turn {scroll_turn + 1}")
                 
             except Exception as e:
                 logger.error(f"❌ Scrolling failed on turn {scroll_turn + 1}: {e}")
