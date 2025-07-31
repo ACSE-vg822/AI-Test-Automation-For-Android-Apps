@@ -164,9 +164,9 @@ def gpt_fallback(d, user_request, app_context_file, initial_screenshot_path=None
                 
                 # Scroll up in the ride selection area (bottom half of screen)
                 start_x = screen_width // 2
-                start_y = int(screen_height * 0.8)  # 80% down 
+                start_y = int(screen_height * 0.5)  # 80% down 
                 end_x = screen_width // 2
-                end_y = int(screen_height * 0.4)    # 40% down 
+                end_y = int(screen_height * 0.2)    # 40% down 
                 
                 logger.info(f"📱 Scrolling: ({start_x}, {start_y}) → ({end_x}, {end_y})")
                 d.swipe(start_x, start_y, end_x, end_y, duration=0.8)
